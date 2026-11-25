@@ -1,0 +1,184 @@
+name: Build release artifacts
+
+# Builds the binary for a tag on a machine the maintainer does not control, in
+# a log anyone can read, and leaves it in a draft release for signing.
+#
+# A signature says a release came from whoever holds the key. It says nothing
+# about whether the binary corresponds to the source anyone can read, so the
+# two are done by different parties: this workflow builds and cannot sign, the
+# maintainer signs and does not build, and compromising either alone yields
+# nothing. The key is deliberately absent from GitHub.
+#
+# A draft release rather than an artifact, because every step here is a shell
+# command and this organisation allows no third-party action. A draft is
+# invisible to anyone but the maintainer until it is published, so nothing
+# reaches anybody unsigned.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build"
+        required: true
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Write, because this creates a draft release; the release API has no
+    # narrower way to stage assets. Pull requests, read, to see whether one is
+    # still waiting on main.
+    permissions:
+      contents: write
+      pull-requests: read
+
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Check out the tagged source
+        run: |
+          set -euo pipefail
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "refs/tags/${TAG}"
+          git checkout -q FETCH_HEAD
+          echo "commit $(git rev-parse HEAD)"
+
+      # A tag pushed while a pull request waits on main is a release cut one
+      # merge early: Porch shipped one, signed and reproduced, holding none of
+      # the change it was cut for. Tags cannot be moved here, so the cure is
+      # the next number, and the time to stop is before anything is built.
+      - name: Refuse to build while a pull request waits on main
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open="$(gh pr list --repo "${GITHUB_REPOSITORY}" --state open --base main \
+            --json number,title --jq '.[] | "#\(.number) \(.title)"')"
+          if [ -n "${open}" ]; then
+            echo "::error::A pull request is open against main. Nothing is built for ${TAG}." >&2
+            echo "${open}" >&2
+            echo "Merge or close it, then cut the next number." >&2
+            exit 1
+          fi
+          echo "no pull request waits on main"
+
+      # The tag's own script and no other: a procedure taken from a branch
+      # anybody with write access can move would decide what the signed bytes
+      # are. Its hash goes into the build record.
+      - name: Use the tag's build script
+        run: |
+          set -euo pipefail
+          if [ ! -f scripts/build.sh ]; then
+            echo "::error::${TAG} has no scripts/build.sh, so nothing can say how it was built." >&2
+            exit 1
+          fi
+          echo "buildscript $(sha256sum scripts/build.sh | cut -d' ' -f1)"
+
+      - name: Report the toolchain
+        run: |
+          go version
+          go env GOROOT
+
+      - name: Build
+        run: bash scripts/build.sh "${TAG}" dist
+
+      - name: Write the build record and the checksums
+        run: |
+          set -euo pipefail
+
+          # The record lets a reproduction that fails say why: two Go versions,
+          # or two build scripts, produce different bytes from the same source.
+          script_hash=$(sha256sum scripts/build.sh | cut -d' ' -f1)
+          commit=$(git rev-parse HEAD)
+          toolchain=$(go version)
+          goroot=$(go env GOROOT)
+
+          cd dist
+
+          # BUILD before the checksums, so it is in SHA256SUMS and covered by
+          # the signature: otherwise whoever could replace an asset could also
+          # write the excuse for its mismatch.
+          {
+            echo "tag ${TAG}"
+            echo "commit ${commit}"
+            echo "toolchain ${toolchain}"
+            echo "goroot ${goroot}"
+            echo "runner ${RUNNER_OS} ${RUNNER_ARCH}"
+            echo "buildscript ${script_hash}"
+            echo "cgo disabled"
+            echo "workflow ${GITHUB_RUN_ID}"
+          } > BUILD
+
+          # sha256sum's own format, so it can be checked with sha256sum -c and
+          # nothing else. Written outside the directory and moved in: with
+          # `sha256sum * > SHA256SUMS` the shell can create the file before
+          # the glob is read, and the list then names itself.
+          sha256sum -- * | sort -k2 > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
+
+          echo "── SHA256SUMS ──"
+          cat SHA256SUMS
+          echo
+          echo "── BUILD ──"
+          cat BUILD
+
+      # A tag can be put on any commit, so the commit being released is
+      # tested here, after the build, so nothing a gate installs can have
+      # touched the bytes.
+      - name: Refuse to stage a build that does not pass its own tests
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./...
+
+      # govulncheck's answer changes when Go publishes a security release,
+      # without a line here changing, so a commit clean when it merged is
+      # checked again on the day it ships. Pinned to the version CI uses.
+      - name: Refuse to stage a build with a known vulnerability
+        run: |
+          set -euo pipefail
+          toolchain="$(go env GOVERSION)"
+          GOTOOLCHAIN="${toolchain:?the toolchain go.mod names could not be fetched}" go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Stage a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # A draft is replaced, so a rerun does not leave half of one attempt
+          # beside half of another. A published release is never touched.
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            if [ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" = "true" ]; then
+              echo "replacing the existing draft for ${TAG}"
+              gh release delete "${TAG}" --yes
+            else
+              echo "::error::${TAG} is already published. Refusing to touch a released tag." >&2
+              exit 1
+            fi
+          fi
+
+          gh release create "${TAG}" dist/* \
+            --draft \
+            --title "${TAG}" \
+            --notes "Built by workflow run ${GITHUB_RUN_ID} from $(git rev-parse HEAD).
+
+          This draft has no signature yet. It becomes a release once the
+          maintainer has rebuilt it, checked every hash against SHA256SUMS,
+          signed that file, and uploaded SHA256SUMS.sig."
+
+          echo
+          echo "Draft staged. The maintainer signs it with:"
+          echo "  powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\release.ps1 -Tag ${TAG} -Compare"
+          echo "The procedure is docs/releasing.md."

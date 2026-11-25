@@ -38,6 +38,17 @@ It answers over TLS only, so it needs a certificate covering `denyfirst.dev`
 and `mta-sts.denyfirst.dev`; a self-signed one does for a local look, with
 `curl --resolve denyfirst.dev:8443:127.0.0.1 --cacert ca.pem`.
 
+## Releases
+
+Each release is built from a signed tag by a public workflow that cannot sign,
+rebuilt on the maintainer's machine and signed only if the bytes match, and
+rebuilt again by a second workflow after it is published. The key that signs
+it is in [`.allowed_signers`](.allowed_signers), the same key as every
+denyfirst release.
+
+- Checking one: [docs/verify.md](docs/verify.md)
+- Cutting one: [docs/releasing.md](docs/releasing.md)
+
 ## Licence
 
 AGPL-3.0. See [LICENSE](LICENSE).

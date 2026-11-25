@@ -129,6 +129,62 @@ jobs:
             exit 1
           fi
 
+  # One build command. scripts/build.sh decides the bytes of a release, and a
+  # second copy of its flags is a second answer to what a release should hash
+  # to; the copy that is wrong is the one nobody runs until it matters.
+  #
+  # And release.ps1 parses. It runs once per release, on the machine holding
+  # the signing key, which is the worst place to find a syntax error.
+  build-command:
+    name: One build command, and a release script that parses
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Only scripts/build.sh carries the release build command
+        run: |
+          set -eu
+          copies="$(grep -rlE 'go build[^#]*-buildvcs' \
+            --include='*.sh' --include='*.ps1' --include='*.yml' \
+            --include='*.md' --include='*.go' . | sort || true)"
+          if [ "${copies}" != "./scripts/build.sh" ]; then
+            echo "The release build command appears somewhere other than scripts/build.sh:"
+            echo "${copies}" | sed 's/^/  /'
+            exit 1
+          fi
+          grep -q 'scripts/build\.sh' docs/verify.md
+          echo "One copy: scripts/build.sh, and docs/verify.md points at it"
+
+      - name: Two builds of one tag are the same bytes
+        run: |
+          set -eu
+          # From two directories, so a path that leaks into the binary shows.
+          bash scripts/build.sh v0.0.0 /tmp/a
+          cp -r . /tmp/elsewhere
+          (cd /tmp/elsewhere && bash scripts/build.sh v0.0.0 /tmp/b)
+          cmp /tmp/a/denyfirstd_v0.0.0_linux_amd64 /tmp/b/denyfirstd_v0.0.0_linux_amd64
+          echo "identical from two directories: $(sha256sum /tmp/a/denyfirstd_v0.0.0_linux_amd64 | cut -c1-16)"
+
+      - name: The release script parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/release.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "  $($_.Extent.StartLineNumber): $($_.Message)" }
+            Write-Host 'scripts/release.ps1 does not parse.'
+            exit 1
+          }
+          Write-Host 'scripts/release.ps1 parses.'
+
   vulncheck:
     name: Known vulnerabilities
     runs-on: ubuntu-latest
