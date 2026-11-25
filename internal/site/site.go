@@ -107,6 +107,9 @@ type page struct {
 	// SiteURL and PorchURL are what the layout puts in front of a link.
 	SiteURL, PorchURL string
 
+	// Coming is what the products menu names as coming soon.
+	Coming []promises.Product
+
 	// Body is filled in at startup. It is template.HTML because the fragment
 	// is a file in this repository rather than anything a visitor supplied.
 	Body template.HTML
@@ -118,6 +121,7 @@ var pages = map[string]*page{
 		Title:       "denyfirst — independent security and privacy tools",
 		Description: "denyfirst builds security and privacy tools that keep your data with you. Porch checks TLS, websites, mail and DNS.",
 		Fragment:    "assets/home.html",
+		Data:        homePage{Coming: promises.Coming},
 	},
 	// The organisation's promises, and this site's own facts. Each product's
 	// page says what it adds, and this one links to each.
@@ -130,6 +134,11 @@ var pages = map[string]*page{
 			Products:     promises.Products,
 		},
 	},
+}
+
+// homePage is what assets/home.html reads.
+type homePage struct {
+	Coming []promises.Product
 }
 
 // organisationPage is what assets/organisation.html reads.
@@ -245,6 +254,7 @@ func canonicalURL(path string) string {
 func render(layout *template.Template, path string, p *page) ([]byte, error) {
 	p.Canonical = canonicalURL(path)
 	p.SiteURL, p.PorchURL = SiteURL, PorchURL
+	p.Coming = promises.Coming
 
 	fragment, err := assets.ReadFile(p.Fragment)
 	if err != nil {

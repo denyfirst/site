@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/denyfirst/site/internal/promises"
 )
 
 // expiryMargin is how long before the Expires date these tests start failing.
@@ -120,6 +122,25 @@ func TestSecurityTxtDoesNotSendExclusionRequestsToSecurity(t *testing.T) {
 	for _, contact := range securityTxtFields(t)["contact"] {
 		if strings.Contains(strings.ToLower(contact), "abuse@") {
 			t.Error("Contact names the abuse mailbox; exclusion requests and vulnerability reports are different queues")
+		}
+	}
+}
+
+// The policy security.txt names is this repository's, which covers this site
+// and says where each product's own policy is: the file is the organisation's
+// contact, for everything it publishes.
+func TestSecurityTxtNamesThisRepositorysPolicy(t *testing.T) {
+	const want = "https://github.com/denyfirst/site/blob/main/SECURITY.md"
+	if got := securityTxtFields(t)["policy"]; len(got) != 1 || got[0] != want {
+		t.Errorf("Policy is %q, want %s", got, want)
+	}
+	policy, err := os.ReadFile("../../SECURITY.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range promises.Products {
+		if !strings.Contains(string(policy), "https://github.com/denyfirst/"+strings.ToLower(p.Name)+"/blob/main/SECURITY.md") {
+			t.Errorf("SECURITY.md does not say where %s's own policy is", p.Name)
 		}
 	}
 }
