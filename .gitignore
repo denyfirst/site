@@ -1,0 +1,31 @@
+# Build output
+/dist/
+*.test
+*.out
+coverage.out
+
+# Secrets. Push protection is the real defence; this is the layer before it.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local tool settings: an allow list of shell commands in a public repository
+# is a line a pull request can add to.
+.claude/settings.local.json
+.claude/settings.json
+
+# Editors and systems
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and patches pulled down by hand
+*.log
+*.patch
+*.diff

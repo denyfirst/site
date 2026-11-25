@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Deny by default at the top level. Jobs opt in to what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────
+# No third-party actions, not one. The checkout is four lines of git, which
+# is already on the runner, and the go command fetches the toolchain go.mod
+# names by itself. There is nothing to pin, so nothing can be left unpinned.
+#
+# The `go install`/`go get` lines below fetch tools through the Go module
+# proxy, which checks every module against the checksum database.
+# ─────────────────────────────────────────────────────────────────────
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Report toolchain
+        run: go version
+
+      - name: No dependencies, and go.mod is tidy
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "go mod tidy modified the repository:"
+            git status --porcelain
+            exit 1
+          fi
+          if grep -q require go.mod; then
+            echo "go.mod requires a module. This site is built from the standard library alone."
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test with race detector
+        run: go test -race -shuffle=on ./...
+
+      - name: Build
+        run: go build -trimpath ./...
+
+  # The front page states facts about Porch's repository: the key that signs
+  # its releases, its licence, that it has no dependencies, and the steps a
+  # release goes through. Those files are there and not here, so this job
+  # fetches them and holds the page to them.
+  #
+  # The grep is there because a test that skips passes, and this one skips
+  # when it is given nothing to read.
+  porch-facts:
+    name: The front page's facts about Porch hold
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Check out Porch's main branch beside it
+        run: |
+          git init -q "${RUNNER_TEMP}/porch"
+          git -C "${RUNNER_TEMP}/porch" remote add origin https://github.com/denyfirst/porch.git
+          git -C "${RUNNER_TEMP}/porch" fetch -q --depth 1 origin main
+          git -C "${RUNNER_TEMP}/porch" checkout -q FETCH_HEAD
+
+      - name: Hold the front page to them
+        run: |
+          PORCH_CHECKOUT="${RUNNER_TEMP}/porch" go test -run FactsAboutPorch -v ./internal/site/ \
+            | tee "${RUNNER_TEMP}/facts.log"
+          grep -q -- '--- PASS: TestTheFrontPagesFactsAboutPorchHold' "${RUNNER_TEMP}/facts.log"
+
+  # The map in CONTRIBUTING.md names every package, and no package it does
+  # not have. A map with a hole is worse than no map: a reader who trusts it
+  # concludes the surface is smaller than it is.
+  package-map:
+    name: Every package is in CONTRIBUTING.md's map
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Compare the map against the tree
+        run: |
+          set -eu
+          ls -d internal/*/ | sed 's|/$||' | sort > /tmp/packages
+          grep -oE '`internal/[a-z0-9]+`' CONTRIBUTING.md | tr -d '`' | sort -u > /tmp/mapped
+          if ! diff -u /tmp/mapped /tmp/packages; then
+            echo "CONTRIBUTING.md's map and the packages under internal/ disagree."
+            exit 1
+          fi
+
+  vulncheck:
+    name: Known vulnerabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      # Built by the toolchain go.mod names: a tool built by an older Go
+      # cannot type-check code for a newer one. The version is read in a
+      # statement of its own, so a failure to fetch the toolchain stops the
+      # step instead of falling back to an older Go.
+      - name: Run govulncheck
+        run: |
+          toolchain="$(go env GOVERSION)"
+          GOTOOLCHAIN="${toolchain:?the toolchain go.mod names could not be fetched}" go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  # Built against golang.org/x/tools v0.51.0, for the reason Porch's CI
+  # gives: the x/tools these tools name cannot read the export data Go 1.27.2
+  # and later write.
+  staticcheck:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Run staticcheck
+        run: |
+          toolchain="$(go env GOVERSION)"
+          export GOTOOLCHAIN="${toolchain:?the toolchain go.mod names could not be fetched}"
+          bin="$(go env GOPATH)/bin"
+          tools="$(mktemp -d)"
+          (
+            cd "${tools}"
+            go mod init staticcheck-build >/dev/null 2>&1
+            go get honnef.co/go/tools/cmd/staticcheck@v0.8.1 golang.org/x/tools@v0.51.0
+            go build -o "${bin}/staticcheck" honnef.co/go/tools/cmd/staticcheck
+          )
+          "${bin}/staticcheck" ./...
+
+  gosec:
+    name: Security linter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Run gosec
+        run: |
+          toolchain="$(go env GOVERSION)"
+          export GOTOOLCHAIN="${toolchain:?the toolchain go.mod names could not be fetched}"
+          bin="$(go env GOPATH)/bin"
+          tools="$(mktemp -d)"
+          (
+            cd "${tools}"
+            go mod init gosec-build >/dev/null 2>&1
+            go get github.com/securego/gosec/v2/cmd/gosec@v2.28.0 golang.org/x/tools@v0.51.0
+            go build -o "${bin}/gosec" github.com/securego/gosec/v2/cmd/gosec
+          )
+          "${bin}/gosec" -severity medium -confidence medium ./...
+
+  # A commit that reaches main unsigned is a commit nobody can attribute. This
+  # checks the commits of a pull request; what a merge does afterwards is
+  # held by the repository's rule that main takes signed commits only.
+  commit-signatures:
+    name: Every commit in this pull request is signed by a known key
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out enough history to see the branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --no-tags --filter=blob:none origin \
+            "+${BASE_SHA}:refs/base" "+${HEAD_SHA}:refs/head"
+          git checkout -q refs/head
+
+      - name: Verify each one against .github/commit-signers
+        run: |
+          set -eu
+          if [ ! -f .github/commit-signers ]; then
+            echo ".github/commit-signers is missing, so nothing can be verified."
+            exit 1
+          fi
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "${PWD}/.github/commit-signers"
+          bad=0
+          checked=0
+          for commit in $(git rev-list refs/base..refs/head); do
+            checked=$((checked + 1))
+            if git verify-commit "${commit}" 2>/dev/null; then
+              continue
+            fi
+            printf 'unsigned or signed by an unknown key: %s %s\n' \
+              "$(git log -1 --format=%h "${commit}")" \
+              "$(git log -1 --format=%s "${commit}")"
+            bad=$((bad + 1))
+          done
+          if [ "${bad}" -ne 0 ]; then
+            echo "${bad} of ${checked} commits cannot be attributed to a key this repository publishes."
+            exit 1
+          fi
+          echo "${checked} commits, every one signed by a published key."

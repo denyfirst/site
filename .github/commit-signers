@@ -1,0 +1,7 @@
+# No blank lines below: some OpenSSH builds read one as a line with a missing key.
+# Every commit in this repository is signed, and this is the list that says by
+# whom. Published so the answer comes from the repository rather than from
+# GitHub, which is not the party a reader needs to trust.
+# Signs commits and tags here and does nothing else. GitHub holds it as a
+# signing key rather than an authentication key, so it cannot push.
+106975655+cyberbihan@users.noreply.github.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHNpNbqkeNwzoNFxmAXL+GwHVauYxxLmvodNZDQIuTt9

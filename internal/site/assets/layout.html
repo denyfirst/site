@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<meta name="description" content="{{.Description}}">
+<!--
+  Which address this page is, said once, and the same title and picture for a
+  link preview. A search engine that has an older shape of this site indexed
+  reads the canonical address and the title together.
+-->
+<link rel="canonical" href="{{.Canonical}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="denyfirst">
+<meta property="og:title" content="{{.Title}}">
+<meta property="og:description" content="{{.Description}}">
+<meta property="og:url" content="{{.Canonical}}">
+<meta property="og:image" content="{{.SiteURL}}/og-denyfirst.png">
+<meta property="og:image:alt" content="denyfirst. Security. On your terms.">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="/icon-denyfirst.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/denyfirst-touch.png">
+<link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+<script src="/theme.js"></script>
+</head>
+<body data-owner="organisation">
+
+<header class="masthead">
+  <a class="wordmark" href="{{.SiteURL}}/"><span class="wordmark-deny">deny</span>first<span class="wordmark-stop">.</span></a>
+  <nav class="masthead-nav" aria-label="Main">
+    <a href="{{.SiteURL}}/">Home</a>
+    <!--
+      Products opens a list on hover or keyboard focus, drawn by the
+      stylesheet alone. Without either — a phone — the link goes to the
+      catalogue on the front page, which is the same list.
+    -->
+    <div class="nav-menu">
+      <a class="nav-menu-button" href="{{.SiteURL}}/#products">Products</a>
+      <ul class="nav-menu-list">
+        <li><a href="{{.PorchURL}}/"><span class="nav-menu-name">Porch</span><span class="nav-menu-note">Infrastructure checks</span></a></li>
+        <li><span class="nav-menu-soon"><span class="nav-menu-name">Rootwell</span><span class="nav-menu-note">Being built</span></span></li>
+      </ul>
+    </div>
+  </nav>
+  <button class="theme-toggle" id="theme-toggle" type="button" hidden>Dark</button>
+</header>
+
+<main>
+{{.Body}}
+</main>
+
+<footer class="colophon">
+  <div class="colophon-row">
+    <div class="colophon-by">
+      <p class="colophon-mark"><span class="colophon-brand"><span class="wordmark-deny">deny</span>first<span class="wordmark-stop">.</span></span></p>
+      <p class="colophon-line">Cites everything. Records nothing.</p>
+    </div>
+    <p class="colophon-links">
+      <a href="{{.SiteURL}}/privacy">Privacy</a>
+      <a href="{{.SiteURL}}/.well-known/security.txt">Security</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
