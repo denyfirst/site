@@ -1,4 +1,4 @@
-<!-- The denyfirst front page, on the demonstration only. -->
+<!-- The denyfirst front page. -->
 <section class="hero">
   <div class="hero-lens" aria-hidden="true">
     <span class="lens-1">evidence</span>
@@ -63,10 +63,13 @@
   </a>
 
   <div class="product-soon">
-    <p class="eyebrow">Coming</p>
-    <h3>Rootwell</h3>
-    <p>A self-hosted workspace for certificates and keys.
-    Rootwell is not available yet, and no date is promised.</p>
+    <p class="eyebrow">Coming soon</p>
+    <ul class="product-soon-list">
+      {{range .Coming}}
+      <li><h3>{{.Name}}</h3><p>{{.What}}</p></li>
+      {{end}}
+    </ul>
+    <p class="product-soon-note">None of these is available yet, and no date is promised.</p>
   </div>
 </section>
 

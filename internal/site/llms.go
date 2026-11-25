@@ -29,6 +29,7 @@ type llmsPage struct {
 type llmsFile struct {
 	Pages    []llmsPage
 	Products []promises.Product
+	Coming   []promises.Product
 	SiteURL  string
 }
 
@@ -50,7 +51,7 @@ func buildLLMs() []byte {
 		panic("site: llms.txt: " + err.Error())
 	}
 	var out bytes.Buffer
-	if err := t.Execute(&out, llmsFile{Pages: list, Products: promises.Products, SiteURL: SiteURL}); err != nil {
+	if err := t.Execute(&out, llmsFile{Pages: list, Products: promises.Products, Coming: promises.Coming, SiteURL: SiteURL}); err != nil {
 		panic("site: llms.txt: " + err.Error())
 	}
 	return []byte(strings.TrimLeft(out.String(), "\n"))

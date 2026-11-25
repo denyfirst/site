@@ -45,7 +45,9 @@
       <a class="nav-menu-button" href="{{.SiteURL}}/#products">Products</a>
       <ul class="nav-menu-list">
         <li><a href="{{.PorchURL}}/"><span class="nav-menu-name">Porch</span><span class="nav-menu-note">Infrastructure checks</span></a></li>
-        <li><span class="nav-menu-soon"><span class="nav-menu-name">Rootwell</span><span class="nav-menu-note">Being built</span></span></li>
+        {{- range .Coming}}
+        <li><span class="nav-menu-soon"><span class="nav-menu-name">{{.Name}}</span><span class="nav-menu-note">Coming soon</span></span></li>
+        {{- end}}
       </ul>
     </div>
   </nav>

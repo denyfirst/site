@@ -45,6 +45,32 @@ func TestTheOrganisationsPromisesNameNoProduct(t *testing.T) {
 	}
 }
 
+// What is coming is named and described, has no address, and is not also
+// released: a product is in one list or the other.
+func TestEveryComingProductIsNamedAndUnlinked(t *testing.T) {
+	names := map[string]bool{}
+	for _, p := range Products {
+		names[p.Name] = true
+	}
+	previous := ""
+	for _, p := range Coming {
+		if p.Name == "" || !strings.HasSuffix(p.What, ".") {
+			t.Errorf("%q is not named and described in a sentence", p.Name)
+		}
+		if p.Home != "" || p.Promises != "" {
+			t.Errorf("%s is coming and has an address; there is no page to send a reader to", p.Name)
+		}
+		if names[p.Name] {
+			t.Errorf("%s is both released and coming", p.Name)
+		}
+		names[p.Name] = true
+		if p.Name < previous {
+			t.Errorf("%s is out of the order of names; the order says nothing about which comes first", p.Name)
+		}
+		previous = p.Name
+	}
+}
+
 // A product's addresses are on its own name under denyfirst.dev, over TLS,
 // and its promises are at an anchor.
 func TestEveryProductHasItsOwnAddress(t *testing.T) {
