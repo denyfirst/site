@@ -89,6 +89,21 @@ func TestWhatLLMsTxtStatesIsSo(t *testing.T) {
 	if !strings.Contains(body, "- [Reporting a vulnerability]("+SiteURL+SecurityTxtPath+")") {
 		t.Error("llms.txt does not say where a vulnerability is reported")
 	}
+	if !strings.Contains(body, "- [Source code](https://github.com/denyfirst)\n") {
+		t.Error("llms.txt does not lead to the organisation's source, every repository of it")
+	}
+	coming, ok := between(body, "## Coming soon\n\nNot available yet, and no date is promised.\n", "\n## ")
+	if !ok {
+		t.Fatal("llms.txt does not say what is coming, and that none of it is available")
+	}
+	for _, p := range promises.Coming {
+		if !strings.Contains(coming, "- "+p.Name+": "+p.What+"\n") {
+			t.Errorf("llms.txt does not name %s as coming", p.Name)
+		}
+		if strings.Contains(coming, "](") {
+			t.Error("llms.txt links a product that has no page yet")
+		}
+	}
 
 	// "This site sets no cookie, loads nothing from another server, and
 	// carries no tracker": held to every address here.
@@ -197,21 +212,50 @@ func TestTheFrontPagesIndexHolds(t *testing.T) {
 }
 
 // The catalogue on the front page and the menu in the header name the same
-// products, and say the same about each.
+// products, and say the same about each: Porch, available and linked, and
+// each product still being built, named as coming soon and linked nowhere.
 func TestTheCatalogueAndTheMenuNameTheSameProducts(t *testing.T) {
 	front := pageBody(t, "/")
 	if !strings.Contains(front, `<h3 class="product-feature-name">porch<span class="wordmark-porch-stop">.</span></h3>`) {
 		t.Error("the front page's card does not name Porch by its mark")
 	}
-	if !strings.Contains(front, "<h3>Rootwell</h3>") {
-		t.Error("the front page does not name Rootwell")
-	}
 	if strings.Count(front, `class="badge badge-live"`) != 1 {
 		t.Error("more or fewer than one product is marked available")
 	}
-	if !strings.Contains(front, "not available yet, and no date is promised.") {
-		t.Error("the front page does not say its planned product is not available")
+	for _, p := range promises.Products {
+		if !strings.Contains(front, `href="`+p.Home+`"`) {
+			t.Errorf("the front page does not lead to %s", p.Name)
+		}
 	}
+
+	if len(promises.Coming) < 3 {
+		t.Fatalf("%d products are coming; this test would pass over fewer than it says", len(promises.Coming))
+	}
+	soon, ok := between(front, `<div class="product-soon">`, "</div>")
+	if !ok {
+		t.Fatal("the front page does not say what is coming")
+	}
+	if !strings.Contains(soon, `<p class="eyebrow">Coming soon</p>`) ||
+		!strings.Contains(soon, `<p class="product-soon-note">None of these is available yet, and no date is promised.</p>`) {
+		t.Error("the front page does not say its coming products are not available, and that no date is promised")
+	}
+	if n := strings.Count(soon, "<li>"); n != len(promises.Coming) {
+		t.Errorf("the front page names %d coming products, and there are %d", n, len(promises.Coming))
+	}
+	if strings.Contains(soon, "<a ") {
+		t.Error("the front page links a product that has no page yet")
+	}
+	at := 0
+	for _, p := range promises.Coming {
+		item := `<li><h3>` + p.Name + `</h3><p>` + escape(p.What) + `</p></li>`
+		where := strings.Index(soon, item)
+		if where < at {
+			t.Errorf("the front page does not carry %s, or not in the list's order", item)
+			continue
+		}
+		at = where
+	}
+
 	for path := range pages {
 		body := pageBody(t, path)
 		menu, ok := between(body, `<ul class="nav-menu-list">`, "</ul>")
@@ -221,17 +265,16 @@ func TestTheCatalogueAndTheMenuNameTheSameProducts(t *testing.T) {
 		if !strings.Contains(menu, `<a href="`+PorchURL+`/"><span class="nav-menu-name">Porch</span>`) {
 			t.Errorf("%s: the products menu does not lead to Porch", path)
 		}
-		if !strings.Contains(menu, `<span class="nav-menu-name">Rootwell</span><span class="nav-menu-note">Being built</span>`) {
-			t.Errorf("%s: the products menu does not name Rootwell as being built", path)
+		if n := strings.Count(menu, "<li>"); n != len(promises.Products)+len(promises.Coming) {
+			t.Errorf("%s: the products menu has %d entries, and there are %d products", path, n, len(promises.Products)+len(promises.Coming))
 		}
-		if strings.Contains(menu, "Rootwell</a>") || strings.Contains(menu, "rootwell.") {
-			t.Errorf("%s: the menu links a product that does not exist yet", path)
-		}
-	}
-	// Every product with a page of promises is in the catalogue.
-	for _, p := range promises.Products {
-		if !strings.Contains(front, `href="`+p.Home+`"`) {
-			t.Errorf("the front page does not lead to %s", p.Name)
+		for _, p := range promises.Coming {
+			if !strings.Contains(menu, `<li><span class="nav-menu-soon"><span class="nav-menu-name">`+p.Name+`</span><span class="nav-menu-note">Coming soon</span></span></li>`) {
+				t.Errorf("%s: the products menu does not name %s as coming soon", path, p.Name)
+			}
+			if strings.Contains(body, p.Name+"</a>") || strings.Contains(strings.ToLower(body), strings.ToLower(p.Name)+".denyfirst.dev") {
+				t.Errorf("%s links %s, which has no page yet", path, p.Name)
+			}
 		}
 	}
 }

@@ -11,6 +11,13 @@
 - [{{.Name}}]({{.Home}}): {{.What}} ([llms.txt]({{.Home}}llms.txt))
 {{- end}}
 
+## Coming soon
+
+Not available yet, and no date is promised.
+{{range .Coming}}
+- {{.Name}}: {{.What}}
+{{- end}}
+
 ## Pages
 {{range .Pages}}
 - [{{.Title}}]({{.URL}}): {{.Description}}
@@ -19,4 +26,4 @@
 ## Contact
 
 - [Reporting a vulnerability]({{.SiteURL}}/.well-known/security.txt)
-- [Source code](https://github.com/denyfirst/porch)
+- [Source code](https://github.com/denyfirst)

@@ -55,8 +55,11 @@ Of particular interest:
 - Content-Security-Policy bypass or injected markup
 - A handshake answered for a name this server does not serve
 
-Porch has its own policy, in
+This is the policy `security.txt` names, so it is where a report about
+anything denyfirst publishes starts. Each product also has a policy of its own,
+in its own repository, saying what is in scope there: Porch's is in
 [denyfirst/porch](https://github.com/denyfirst/porch/blob/main/SECURITY.md).
+The address and the key above take reports for any of them.
 
 ## Out of scope
 

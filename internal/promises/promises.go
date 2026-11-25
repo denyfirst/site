@@ -81,13 +81,35 @@ type Product struct {
 // Products is every product this site links to.
 //
 // A product is listed once it has a page that says what it adds. One that is
-// being built is not here: a link to a page that does not exist yet would send
-// a reader to a promise nobody has made.
+// being built is in Coming instead: a link to a page that does not exist yet
+// would send a reader to a promise nobody has made.
 var Products = []Product{
 	{
 		Name:     "Porch",
 		What:     "Checks TLS, websites, mail and DNS, and grades what it finds.",
 		Home:     "https://porch.denyfirst.dev/",
 		Promises: "https://porch.denyfirst.dev/privacy#promises",
+	},
+}
+
+// Coming is what denyfirst is building and has not released, in the order of
+// their names. Each is named with what it is for and nothing more: no address,
+// because there is no page to send a reader to, and no date, because none is
+// promised. The menu, the front page and llms.txt are all drawn from this
+// list, so a product announced in one is announced in all three.
+//
+// A product moves to Products on the day it has a page saying what it adds.
+var Coming = []Product{
+	{
+		Name: "Keybash",
+		What: "A self-hosted workspace for SSH and RDP: your own credentials, and your servers from a browser.",
+	},
+	{
+		Name: "Mohur",
+		What: "Private messages between organisations that each run their own server, end-to-end encrypted, with no central service.",
+	},
+	{
+		Name: "Rootwell",
+		What: "A self-hosted workspace for certificates and keys.",
 	},
 }
