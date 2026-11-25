@@ -59,6 +59,9 @@ that improves one at the cost of another is argued before it is written.
   each commit of a pull request.
 - **Stage by name, never `git add -A`,** and read the index before and after.
 - **Merge commits only.** A rebase cannot keep a commit signature.
+- **One build command.** `scripts/build.sh` decides a release's bytes, and
+  CI fails if its flags appear anywhere else. Cutting a release is
+  `docs/releasing.md`.
 - **Nothing that describes the server** — paths, accounts, unit names,
   monitoring, hardening — is written here. It lives in the private operations
   repository.

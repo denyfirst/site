@@ -1,5 +1,6 @@
-# Build output
+# Build output, and the rebuild release.ps1 -Compare makes
 /dist/
+/dist-local/
 *.test
 *.out
 coverage.out

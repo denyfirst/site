@@ -1,0 +1,126 @@
+name: Reproduce
+
+# Rebuilds a published release from its tag on a fresh runner and compares
+# the bytes with the ones the release carries, after checking the release is
+# signed by the key in .allowed_signers.
+#
+# The maintainer rebuilds and compares before signing; this is somebody else
+# doing it again, after publication, in a log anyone can read. A release that
+# only its signer has reproduced is a release one party vouches for.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to reproduce"
+        required: true
+
+permissions: {}
+
+jobs:
+  reproduce:
+    name: Reproduce the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+
+    steps:
+      - name: Check out the tagged source
+        run: |
+          set -euo pipefail
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "refs/tags/${TAG}"
+          git checkout -q FETCH_HEAD
+          echo "commit $(git rev-parse HEAD)"
+
+      - name: Fetch the published checksums and build record
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          gh release download "${TAG}" --pattern SHA256SUMS --dir published --clobber
+          gh release download "${TAG}" --pattern BUILD --dir published --clobber
+          echo "── how the release was built ──"
+          cat published/BUILD
+
+      # The build script decides the bytes, so a different one makes a byte
+      # comparison meaningless, or is the change somebody made to change them.
+      - name: Prove the build script is the one that built the release
+        run: |
+          set -euo pipefail
+          have=$(sha256sum scripts/build.sh | cut -d' ' -f1)
+          want=$(awk '$1 == "buildscript" { print $2 }' published/BUILD)
+          echo "buildscript ${have}"
+          if [ -z "${want}" ] || [ "${have}" != "${want}" ]; then
+            echo "::error::The build script is not the one that built this release." >&2
+            echo "  released with ${want:-nothing recorded}" >&2
+            echo "  reproducing with ${have}" >&2
+            exit 1
+          fi
+
+      # A published release with no signature, or one the key does not verify,
+      # fails here rather than passing on a matching build alone. BUILD is in
+      # SHA256SUMS, so this also covers the record read above.
+      - name: Check that the release is signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${TAG}" --pattern SHA256SUMS.sig --dir published --clobber
+          ssh-keygen -Y verify \
+            -f .allowed_signers \
+            -I releases@denyfirst.dev \
+            -n file \
+            -s published/SHA256SUMS.sig \
+            < published/SHA256SUMS
+          (cd published && sha256sum -c --ignore-missing SHA256SUMS)
+
+      # A reader following docs/verify.md fetches the default branch's copy of
+      # the keys, so the tag has to trust the same ones or the signature that
+      # verified above is not the one they check.
+      - name: Check that the tag trusts the same keys as the default branch
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/.allowed_signers" \
+            -o /tmp/allowed_signers.main
+          if ! diff -u .allowed_signers /tmp/allowed_signers.main; then
+            echo "::error::This tag trusts a different set of release keys from the default branch." >&2
+            exit 1
+          fi
+          echo "The tag and the default branch trust the same keys."
+
+      - name: Report this toolchain
+        run: |
+          echo "toolchain $(go version)"
+          echo "goroot $(go env GOROOT)"
+          echo "runner ${RUNNER_OS} ${RUNNER_ARCH}"
+
+      - name: Build
+        run: bash scripts/build.sh "${TAG}" rebuilt
+
+      - name: Compare
+        run: |
+          set -euo pipefail
+          (cd rebuilt && sha256sum -- * | sort -k2) > rebuilt.sums
+          awk '$2 != "SHA256SUMS" && $2 != "BUILD"' published/SHA256SUMS | sort -k2 > published.sums
+          if diff -u published.sums rebuilt.sums; then
+            echo
+            echo "The published binary matches a build of the tagged source."
+            exit 0
+          fi
+          echo
+          echo "The published binary does NOT match a build of the tagged source."
+          echo "Before assuming tampering, compare the toolchain and goroot lines of"
+          echo "the two records printed above: a different Go version gives different"
+          echo "bytes from the same source. If they agree and the hashes do not, that"
+          echo "is the case this check exists for."
+          exit 1
