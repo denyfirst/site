@@ -1,0 +1,14 @@
+# Keys trusted to sign denyfirst releases: the same key signs every
+# product's, and this site's.
+#
+# Used with:
+#   ssh-keygen -Y verify -f .allowed_signers -I releases@denyfirst.dev \
+#              -n file -s SHA256SUMS.sig < SHA256SUMS
+#
+# This key is not the one used to push to GitHub, and GitHub does not hold a
+# copy. A key stored in this repository's secrets would let anyone who took
+# the account sign a release, and the signature would then confirm only that
+# they had access. Signing happens on the maintainer's machine; if that ever
+# changes, this file changes with it, and its history is the record of when.
+
+releases@denyfirst.dev ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDD7Ie9zRf76RynH052/Abkv5k2nzosQd2DihyQMixVR denyfirst releases

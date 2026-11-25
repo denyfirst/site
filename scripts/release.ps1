@@ -1,0 +1,467 @@
+<#
+.SYNOPSIS
+    Signs a release that was built in public, and publishes it.
+
+.DESCRIPTION
+    The binaries are not built here. A workflow builds them from the tagged
+    source on a machine nobody controls, in a log anyone can read, and this
+    downloads that result, checks it, signs the checksums and publishes.
+
+    The reason is the one that matters most about a release. A signature says
+    the artifacts came from whoever holds the key; it says nothing about
+    whether they correspond to the source. Building on the same machine that
+    signs means one compromise produces both a malicious binary and a valid
+    signature for it, and nothing in the chain notices.
+
+    Splitting it means two separate parties are involved: a workflow that
+    builds but cannot sign, and this machine, which signs but does not build.
+    Compromising either alone yields nothing, and the build is visible to
+    everyone while it happens.
+
+    Optionally rebuilds locally and compares. It is off by default because it
+    needs bash and a checkout of the tag. See -Compare.
+
+    This is Porch's release script with this repository's names; the reasons
+    below that carry dates are Porch's releases, where each was learned.
+
+.PARAMETER Tag
+    The version being released, such as v0.1.0.
+
+.PARAMETER SigningKey
+    Path to the private key used for the signature. Separate from the GitHub
+    key on purpose: one being lost must not cost the other.
+
+.PARAMETER Compare
+    Rebuild locally and compare against what the workflow produced.
+
+    A build from Windows matches the workflow's on Linux byte for byte when
+    the toolchain came from the module cache rather than from an installed
+    GOROOT, because -trimpath normalises module cache paths.
+
+    So it holds wherever the toolchain is the fetched one, which is whenever
+    the go directive in go.mod names a version other than the Go on PATH. When
+    they are the same version, the build uses the installed GOROOT and the
+    bytes will differ by that path. BUILD records the goroot for exactly this
+    comparison; check it before concluding anything from a mismatch.
+
+    Runs scripts/build.sh — the one the release's BUILD record names — so it
+    needs bash. Found on PATH, or in the usual Git for Windows locations, which
+    is where it actually lives: the installer adds cmd\ to PATH but not bin\.
+
+.EXAMPLE
+    powershell.exe -ExecutionPolicy Bypass -File .\scripts\release.ps1 -Tag v0.2.0
+
+    On a default Windows installation PowerShell refuses to run any script
+    file, so `.\scripts\release.ps1` fails before this script starts. The
+    child process above is allowed to and changes nothing outside itself.
+
+    This example used to be the bare path, which is an instruction that does
+    not work on the one kind of machine it is written for. Do not relax the
+    machine's policy instead: the execution policy is not a security boundary
+    -- -ExecutionPolicy Bypass is a documented flag, not a trick -- so making
+    it permanent buys no safety and loses the accident it does prevent. What
+    protects this step is that the script is in this repository and has been
+    read.
+
+.EXAMPLE
+    powershell.exe -ExecutionPolicy Bypass -File .\scripts\release.ps1 -Tag v0.2.0 -Compare
+
+    -Compare needs the tag checked out. It rebuilds from the tag's own build
+    script, and against a different working tree it reports a difference count
+    for the wrong source.
+
+.NOTES
+    The whole procedure, including the dry run that has to happen before a
+    first release and after any change to this script, is docs/releasing.md.
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
+    [string]$Tag,
+
+    [string]$SigningKey = "$env:USERPROFILE\.ssh\id_ed25519_denyfirst_release",
+
+    [string]$Identity = 'releases@denyfirst.dev',
+
+    [switch]$Compare
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Push-Location $repoRoot
+
+try {
+    # Cleared before anything can stop this script, and kept per tag.
+    #
+    # On 2026-10-01 v0.26.0 was published carrying the signature from the
+    # v0.26.0-rc1 dry run. This script had not run for v0.26.0 -- it cleared
+    # its directory as it started, so had it run, the old file could not have
+    # survived -- and the upload that followed sent whatever
+    # dist\SHA256SUMS.sig held. reproduce.yml said so in public within the
+    # minute, and every installation that checked the signature refused, but
+    # the release went out with nothing that verified it.
+    #
+    # So the directory is named for the tag and the upload names it too: a
+    # signature this script did not make for this tag is not at the path the
+    # upload reads. And everything under dist goes before the first check
+    # that can stop the script, so a run that stops early leaves nothing to
+    # upload rather than whatever the last run left.
+    $distRoot = Join-Path $repoRoot 'dist'
+    if (Test-Path $distRoot) { Remove-Item -Recurse -Force $distRoot }
+    $dist = Join-Path $distRoot $Tag
+
+    if (-not (Test-Path $SigningKey)) {
+        throw "No signing key at $SigningKey."
+    }
+
+    $tagged = (git rev-list -n 1 $Tag 2>$null)
+    if (-not $tagged) {
+        throw "Tag $Tag does not exist locally. Create and push it first:`n  git tag -s $Tag -m 'notes'`n  git push origin $Tag"
+    }
+
+    # ── Fetch what the workflow built ──────────────────────────────────────
+    #
+    # The workflow leaves a draft release. A draft is invisible to anyone but
+    # the maintainer, so the binaries sit there unsigned without anybody being
+    # able to download them, which is the property that makes this safe to do
+    # in two steps.
+
+    Write-Host "Downloading the draft release for $Tag" -ForegroundColor Cyan
+
+    New-Item -ItemType Directory -Path $dist -Force | Out-Null
+    gh release download $Tag --dir $dist --clobber
+    if ($LASTEXITCODE -ne 0) {
+        # A download can fail with the release right there: on one of Porch's
+        # release evenings a dropped connection was reported as no release, and
+        # the advice to push the tag again pointed at the one step that had
+        # worked. Ask whether the release exists before saying it does not.
+        # try/catch because stderr from a native command under 'Stop' throws.
+        $exists = $false
+        try {
+            $null = gh release view $Tag --json tagName 2>$null
+            $exists = ($LASTEXITCODE -eq 0)
+        } catch {
+            $exists = $false
+        }
+        if ($exists) {
+            throw "The release for $Tag is there, but downloading it failed, usually a dropped connection. Run this script again."
+        }
+        throw "No release found for $Tag. Push the tag and wait for build-release.yml, or start it with:`n  gh workflow run build-release.yml -f tag=$Tag"
+    }
+
+    $published = Join-Path $dist 'SHA256SUMS.sig'
+    if (Test-Path $published) {
+        Write-Warning "This release already carries a signature. Signing again replaces it."
+        # Removed now rather than overwritten at the end, so the only
+        # signature this directory can hold is one this run made. A run that
+        # stops before signing would otherwise leave the downloaded one at
+        # the path the upload reads.
+        Remove-Item -Force $published
+    }
+
+    $checksums = Join-Path $dist 'SHA256SUMS'
+    $buildInfo = Join-Path $dist 'BUILD'
+    if (-not (Test-Path $checksums)) { throw "The artifact has no SHA256SUMS." }
+    if (-not (Test-Path $buildInfo)) { throw "The artifact has no BUILD record." }
+
+    # ── Check what is about to be signed ───────────────────────────────────
+    #
+    # A signature over a file nobody read is a signature over whatever was in
+    # it. The commit is checked against the tag, and every listed file has to
+    # be present with the hash the list claims.
+
+    Write-Host "`nBuild record" -ForegroundColor Cyan
+    Get-Content $buildInfo | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+
+    function Read-BuildField([string]$name) {
+        # Matched explicitly rather than by chaining onto Select-String's
+        # result, which under StrictMode throws a message about a null
+        # property when what actually happened is that the record is missing
+        # a field. Failing closed is right; failing closed with an
+        # unreadable reason is how a check gets skipped next time.
+        $match = Select-String -Path $buildInfo -Pattern "^$name\s+(\S+)"
+        if (-not $match) {
+            throw "The build record has no '$name' field. Nothing was signed."
+        }
+        return $match.Matches.Groups[1].Value
+    }
+
+    $recordedCommit = Read-BuildField 'commit'
+    if ($recordedCommit -ne $tagged.Trim()) {
+        throw "The build records commit $recordedCommit but $Tag points at $($tagged.Trim())."
+    }
+
+    $recordedTag = Read-BuildField 'tag'
+    if ($recordedTag -ne $Tag) {
+        throw "The build records tag $recordedTag rather than $Tag."
+    }
+
+    # ── The procedure, not only the source ─────────────────────────────────
+    #
+    # The commit check above says the workflow built the right source. It says
+    # nothing about how, and the how is a file: scripts/build.sh decides the
+    # flags, and therefore the bytes. It used to be fetched from the default
+    # branch at build time, so somebody able to move that branch could change
+    # what a tagged, honest commit compiled into — and reproduce.yml read the
+    # same mutable file, so the reproduction agreed.
+    #
+    # This is the half of that fix which lives on the machine holding the key.
+    # A signature is a statement about bytes; this is what lets the statement
+    # mean "built by the procedure in this repository" rather than "built
+    # somehow".
+    $recordedScript = Read-BuildField 'buildscript'
+
+    function Get-BlobSha256([string]$rev) {
+        # Through a file rather than a pipeline: PowerShell decodes and
+        # re-encodes text, which would change the bytes being hashed. The same
+        # reason the signature check at the bottom uses cmd's redirection.
+        $temporary = [System.IO.Path]::GetTempFileName()
+        try {
+            cmd /c "git show `"$rev`" > `"$temporary`" 2>nul" | Out-Null
+            if ($LASTEXITCODE -ne 0) { return $null }
+            if ((Get-Item $temporary).Length -eq 0) { return $null }
+            return (Get-FileHash -Algorithm SHA256 $temporary).Hash.ToLower()
+        }
+        finally {
+            Remove-Item $temporary -ErrorAction SilentlyContinue
+        }
+    }
+
+    # The revision is kept beside the hash, not only the label. -Compare below
+    # runs the script this loop matched, and "the tag" is not something bash
+    # can be handed.
+    $scriptSources = [ordered]@{
+        "the tag $Tag" = @{ Rev = "${Tag}:scripts/build.sh";     Hash = Get-BlobSha256 "${Tag}:scripts/build.sh" }
+    }
+
+    $scriptSource = $null
+    $scriptRev = $null
+    foreach ($candidate in $scriptSources.GetEnumerator()) {
+        if ($candidate.Value.Hash -and $candidate.Value.Hash -eq $recordedScript) {
+            $scriptSource = $candidate.Key
+            $scriptRev = $candidate.Value.Rev
+            break
+        }
+    }
+
+    if (-not $scriptSource) {
+        $seen = ($scriptSources.GetEnumerator() |
+            ForEach-Object { "    $($_.Key): $(if ($_.Value.Hash) { $_.Value.Hash } else { 'absent' })" }) -join "`n"
+        throw @"
+The release was built by a script this repository does not contain.
+
+  recorded in BUILD: $recordedScript
+$seen
+
+scripts/build.sh decides the build flags and therefore the bytes, so a
+procedure nobody can point at is a binary nobody can account for. Fetch
+origin, read the diff, and only sign once the hash above is one you can
+find in the history. Nothing was signed.
+"@
+    }
+    Write-Host "  build script matches $scriptSource" -ForegroundColor DarkGray
+
+    Write-Host "`nVerifying every hash in the list" -ForegroundColor Cyan
+    $bad = 0
+    foreach ($line in Get-Content $checksums) {
+        if ($line -notmatch '^([0-9a-f]{64})\s+(.+)$') { continue }
+        $want = $Matches[1]
+        $name = $Matches[2].Trim()
+
+        $file = Join-Path $dist $name
+        if (-not (Test-Path $file)) {
+            Write-Host "  missing: $name" -ForegroundColor Red
+            $bad++
+            continue
+        }
+        $have = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+        if ($have -ne $want) {
+            Write-Host "  mismatch: $name" -ForegroundColor Red
+            $bad++
+        }
+    }
+    if ($bad -gt 0) { throw "$bad file(s) do not match the checksum list. Nothing was signed." }
+    Write-Host "  every file matches" -ForegroundColor DarkGray
+
+    # ── Optionally rebuild and compare ─────────────────────────────────────
+
+    if ($Compare) {
+        Write-Host "`nRebuilding locally to compare" -ForegroundColor Cyan
+        Write-Host "  (identical bytes are expected wherever the toolchain came from the module cache;" -ForegroundColor DarkGray
+        Write-Host "   compare the goroot line in BUILD before reading a difference as tampering)" -ForegroundColor DarkGray
+
+        $local = Join-Path $repoRoot 'dist-local'
+        if (Test-Path $local) { Remove-Item -Recurse -Force $local }
+        New-Item -ItemType Directory -Path $local | Out-Null
+
+        $head = (git rev-parse HEAD).Trim()
+        if ($head -ne $tagged.Trim()) {
+            # Was a warning, which meant the comparison ran against whatever
+            # was checked out and reported a difference count for the wrong
+            # source. A check whose result cannot be interpreted is worse than
+            # no check: the number looks like evidence.
+            throw "HEAD is $head but $Tag points at $($tagged.Trim()). Check out the tag before comparing:`n  git checkout $Tag"
+        }
+
+        # The build command is not written out here.
+        #
+        # It used to be. This script carried its own transcription of the go
+        # build line, beside the copy in scripts/build.sh that actually
+        # produced the release — the second copy of a command whose own header
+        # says two copies drift. This is the worst place for that pair to
+        # drift: the comparison would report every artifact different, on an
+        # honest release, on the machine holding the signing key, at the moment
+        # the maintainer is deciding whether to sign. A check that cries wolf
+        # is a check that gets waved through, and then it is worse than absent.
+        #
+        # So the script BUILD names is the script that runs, taken from the
+        # revision matched above rather than from the working tree, which may
+        # have moved on since the tag.
+        # Git for Windows ships bash, and puts only its cmd\ directory on PATH.
+        # So `bash` is absent from an ordinary PowerShell session on a machine
+        # that has a perfectly good one, and the first version of this threw
+        # there — on the maintainer's own machine, which is the one machine it
+        # exists to run on: Get-Command found nothing while
+        # C:\Program Files\Git\bin\bash.exe existed and built every artifact.
+        # A check that cannot start is a check that never runs.
+        #
+        # Interpolated rather than joined: an unset variable yields a path that
+        # Test-Path simply calls false, which is the answer wanted here.
+        $bash = Get-Command bash -ErrorAction SilentlyContinue
+        if (-not $bash) {
+            foreach ($candidate in @(
+                    "$env:ProgramFiles\Git\bin\bash.exe",
+                    "${env:ProgramFiles(x86)}\Git\bin\bash.exe",
+                    "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
+                if (Test-Path $candidate) {
+                    $bash = Get-Command $candidate
+                    Write-Host "  bash is not on PATH; using $candidate" -ForegroundColor DarkGray
+                    break
+                }
+            }
+        }
+
+        if (-not $bash) {
+            # A throw rather than a warning. A comparison that quietly did not
+            # happen reads, three lines later, exactly like one that passed.
+            throw @"
+-Compare needs bash to run scripts/build.sh, and none was found.
+
+Looked on PATH and in the places Git for Windows installs one. Install Git for
+Windows, or run this step on Linux, where the comparison is meaningful anyway.
+Rebuilding by hand is not a substitute — a second copy of the build command is
+the thing this check exists to avoid. Nothing was signed.
+"@
+        }
+
+        $buildScript = Join-Path ([System.IO.Path]::GetTempPath()) "denyfirst-build-$([System.IO.Path]::GetRandomFileName()).sh"
+        try {
+            cmd /c "git show `"$scriptRev`" > `"$buildScript`" 2>nul" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not read $scriptRev. Nothing was signed." }
+
+            # Extracted, then hashed again. The first check said a matching
+            # blob exists in the history; this one says the bytes about to be
+            # executed are that blob.
+            $extracted = (Get-FileHash -Algorithm SHA256 $buildScript).Hash.ToLower()
+            if ($extracted -ne $recordedScript) {
+                throw "The extracted build script hashes $extracted, not the $recordedScript in BUILD. Nothing was signed."
+            }
+
+            & $bash.Source $buildScript $Tag 'dist-local'
+            if ($LASTEXITCODE -ne 0) { throw 'The local rebuild failed. Nothing was signed.' }
+        }
+        finally {
+            Remove-Item $buildScript -ErrorAction SilentlyContinue
+        }
+
+        # Named, not only counted. "3 different" out of ten is a number an
+        # operator cannot act on; the three names say at once whether this is
+        # one platform's toolchain or something that needs stopping for.
+        $same = 0; $different = @()
+        Get-ChildItem $local -File | ForEach-Object {
+            $theirs = Join-Path $dist $_.Name
+            if (-not (Test-Path $theirs)) { $different += "$($_.Name) (not in the release)"; return }
+            $mine = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
+            if ($mine -eq (Get-FileHash -Algorithm SHA256 $theirs).Hash.ToLower()) { $same++ }
+            else { $different += $_.Name }
+        }
+
+        # And the other way round: everything the list names was rebuilt
+        # here. BUILD aside, which is a record rather than a build and is read
+        # field by field above. A file only the workflow produced is one the
+        # signature would vouch for with nothing to compare it against.
+        $rebuilt = @(Get-ChildItem $local -File | ForEach-Object { $_.Name })
+        foreach ($line in Get-Content $checksums) {
+            if ($line -notmatch '^[0-9a-f]{64}\s+(.+)$') { continue }
+            $name = $Matches[1].Trim()
+            if ($name -ne 'BUILD' -and $rebuilt -notcontains $name) { $different += "$name (not rebuilt here)" }
+        }
+
+        Write-Host "  $same identical, $($different.Count) different" -ForegroundColor DarkGray
+        foreach ($name in $different) { Write-Host "    differs: $name" -ForegroundColor Yellow }
+        Remove-Item -Recurse -Force $local
+
+        # A refusal, not a line to read. The passphrase prompt comes next,
+        # and until 2026-10-01 it came after a difference count too: the
+        # count was printed, and the signature over the files it counted was
+        # one keystroke away, so a difference is never signed past. If it is
+        # the toolchain -- BUILD's goroot line against
+        # `go env GOROOT` here -- that is fixed here, and this run again.
+        if ($different.Count -gt 0) {
+            throw "$($different.Count) file(s) built here are not the release's. Compare the goroot line in BUILD with go env GOROOT before reading this as tampering. Nothing was signed."
+        }
+    }
+
+    # ── Sign ───────────────────────────────────────────────────────────────
+    #
+    # Only SHA256SUMS is signed. Signing every file would produce a signature
+    # nobody checks in full; signing the list means one verification covers
+    # every artifact, and the list itself is the record of what was released.
+
+    Write-Host "`nSigning SHA256SUMS" -ForegroundColor Cyan
+    ssh-keygen -Y sign -f $SigningKey -n file $checksums
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -Force "$checksums.sig" -ErrorAction SilentlyContinue
+        throw 'Signing failed.'
+    }
+
+    $allowed = Join-Path $repoRoot '.allowed_signers'
+    if (Test-Path $allowed) {
+        Write-Host 'Verifying the signature as a user would' -ForegroundColor Cyan
+
+        # cmd's redirection rather than a PowerShell pipeline: Get-Content
+        # decodes and re-encodes, which turns the LF endings into CRLF and
+        # changes the bytes the signature covers. The check would then fail on
+        # a perfectly good file, which is worse than not checking — it teaches
+        # whoever sees it to ignore the result.
+        # Every interpolated value is quoted. $Tag is constrained by
+        # ValidatePattern and $Identity is not, so an identity containing a
+        # quote would otherwise end the argument and hand the rest to cmd as
+        # commands. It is an operator-supplied parameter rather than anything
+        # a stranger sends, which makes this cheap rather than urgent — and
+        # cheap is not a reason to leave it.
+        cmd /c "ssh-keygen -Y verify -f `"$allowed`" -I `"$Identity`" -n file -s `"$checksums.sig`" < `"$checksums`""
+        if ($LASTEXITCODE -ne 0) {
+            # Removed, so that a signature nobody could verify is not there
+            # for the upload to find.
+            Remove-Item -Force "$checksums.sig" -ErrorAction SilentlyContinue
+            throw 'The signature did not verify against .allowed_signers. It was removed, so there is nothing to upload.'
+        }
+    }
+    else {
+        Write-Warning ".allowed_signers is missing, so the signature was not checked the way a user would."
+    }
+
+    Write-Host "`nSigned." -ForegroundColor Green
+    Write-Host "Upload the signature, then the notes, then publish (docs/releasing.md):" -ForegroundColor Green
+    Write-Host "  gh release upload $Tag dist\$Tag\SHA256SUMS.sig --clobber" -ForegroundColor DarkGray
+    Write-Host "  gh release edit $Tag --notes-file NOTES.md" -ForegroundColor DarkGray
+    Write-Host "  gh release edit $Tag --draft=false" -ForegroundColor DarkGray
+}
+finally {
+    Pop-Location
+}
