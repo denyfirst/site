@@ -13,6 +13,12 @@ signing machine. Two parties make it, and neither can do it alone:
 `scripts/build.sh` is the only build command. Every step above runs it, and CI
 fails if its flags appear anywhere else.
 
+**What a release publishes is true on the day it is published.** Mohur's
+privacy page, in Mohur's words, says that denyfirst runs one Mohur
+organization for Microsoft's testers. A release that carries it is cut only
+while that organization runs; if it stops, Mohur's page changes first, in
+Mohur's repository, and reaches this site by the copy CI holds it to.
+
 ---
 
 ## The release

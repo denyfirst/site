@@ -421,6 +421,41 @@ h1 {
 /* Anchored headings should not land under the top of the window. */
 .prose h2[id] { scroll-margin-top: 1.5rem; }
 
+/*
+  A product's policy page, in the product's own words: what it has that the
+  organisation's pages do not is a heading under a section, a list of
+  points, a name in code, and bold that leads a point. Scoped to the policy,
+  so the organisation's pages draw as they did. A policy is read for the
+  point that concerns the reader, so each promise is a heading of its own
+  and a lead stands out from the text it leads.
+*/
+.product-policy h3 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 620;
+  letter-spacing: -0.008em;
+  scroll-margin-top: 1.5rem;
+}
+
+.product-policy ul {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  color: var(--ink-soft);
+}
+
+.product-policy li { margin: 0 0 0.45rem; }
+
+.product-policy strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.product-policy code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
 /* Words for assistive technology, and nothing on the screen. */
 .visually-hidden {
   position: absolute;

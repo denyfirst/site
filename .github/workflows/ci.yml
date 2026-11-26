@@ -103,6 +103,38 @@ jobs:
             | tee "${RUNNER_TEMP}/facts.log"
           grep -q -- '--- PASS: TestTheFrontPagesFactsAboutPorchHold' "${RUNNER_TEMP}/facts.log"
 
+  # Mohur's privacy page and terms of use are Mohur's own files, which its app
+  # ships and shows. The copies here are held to Mohur's main branch, so the
+  # page the Microsoft Store links cannot say less, or more, than the app.
+  #
+  # The grep is there because a test that skips passes, and this one skips
+  # when it is given nothing to read.
+  mohur-words:
+    name: Mohur's pages are Mohur's words
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit under test
+        run: |
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+
+      - name: Check out Mohur's main branch beside it
+        run: |
+          git init -q "${RUNNER_TEMP}/mohur"
+          git -C "${RUNNER_TEMP}/mohur" remote add origin https://github.com/denyfirst/mohur.git
+          git -C "${RUNNER_TEMP}/mohur" fetch -q --depth 1 origin main
+          git -C "${RUNNER_TEMP}/mohur" checkout -q FETCH_HEAD
+
+      - name: Hold the pages to Mohur's files
+        run: |
+          MOHUR_CHECKOUT="${RUNNER_TEMP}/mohur" go test -run MohursOwnWords -v ./internal/site/ \
+            | tee "${RUNNER_TEMP}/mohur.log"
+          grep -q -- '--- PASS: TestMohursPoliciesAreMohursOwnWords' "${RUNNER_TEMP}/mohur.log"
+
   # The map in CONTRIBUTING.md names every package, and no package it does
   # not have. A map with a hole is worse than no map: a reader who trusts it
   # concludes the surface is smaller than it is.

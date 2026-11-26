@@ -47,6 +47,11 @@ that improves one at the cost of another is argued before it is written.
   a permanent redirect, and a test names it.
 - **The redirects to Porch stay.** Every address of Porch's that denyfirst.dev
   ever answered is in a link somebody kept.
+- **Mohur's pages are Mohur's files.** `internal/site/assets/mohur/` holds
+  Mohur's `docs/policies/privacy.md` and `terms.md` byte for byte, because its
+  app shows the same two files. A change is made in Mohur's repository and
+  copied here, never made here first; CI compares the copies with Mohur's main
+  branch.
 
 ---
 
@@ -83,4 +88,11 @@ its release steps — and one test reads them there:
 ```sh
 git clone --depth 1 https://github.com/denyfirst/porch ../porch
 PORCH_CHECKOUT=../porch go test -run FactsAboutPorch -v ./internal/site/
+```
+
+Mohur's pages are Mohur's files, and one test compares them:
+
+```sh
+git clone --depth 1 https://github.com/denyfirst/mohur ../mohur
+MOHUR_CHECKOUT=../mohur go test -run MohursOwnWords -v ./internal/site/
 ```

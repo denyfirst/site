@@ -1,0 +1,20 @@
+{{define "inline"}}{{range .}}{{if eq .T "b"}}<strong>{{.V}}</strong>{{else if eq .T "code"}}<code>{{.V}}</code>{{else if eq .T "link"}}<a href="{{.Href}}">{{.V}}</a>{{else}}{{.V}}{{end}}{{end}}{{end -}}
+<article class="prose product-policy">
+{{range .Blocks}}
+{{- if eq .T "h1"}}
+    <h1>{{template "inline" .Inline}}</h1>
+{{- else if eq .T "h2"}}
+    <h2 id="{{.ID}}">{{template "inline" .Inline}}</h2>
+{{- else if eq .T "h3"}}
+    <h3 id="{{.ID}}">{{template "inline" .Inline}}</h3>
+{{- else if eq .T "p"}}
+    <p>{{template "inline" .Inline}}</p>
+{{- else if eq .T "ul"}}
+    <ul>
+      {{- range .Items}}
+      <li>{{template "inline" .}}</li>
+      {{- end}}
+    </ul>
+{{- end}}
+{{end}}
+  </article>

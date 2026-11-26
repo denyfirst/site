@@ -106,7 +106,7 @@ var Coming = []Product{
 	},
 	{
 		Name: "Mohur",
-		What: "Private messages between organisations that each run their own server, end-to-end encrypted, with no central service.",
+		What: "Encrypted messages between organizations that each run their own server.",
 	},
 	{
 		Name: "Rootwell",

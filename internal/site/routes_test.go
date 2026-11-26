@@ -16,6 +16,8 @@ func TestEveryAddressHereAnswers(t *testing.T) {
 	want := map[string]string{
 		"/":                     "text/html; charset=utf-8",
 		"/privacy":              "text/html; charset=utf-8",
+		"/mohur/privacy":        "text/html; charset=utf-8",
+		"/mohur/terms":          "text/html; charset=utf-8",
 		"/robots.txt":           "text/plain; charset=utf-8",
 		"/sitemap.xml":          "application/xml; charset=utf-8",
 		"/llms.txt":             "text/plain; charset=utf-8",
@@ -99,6 +101,9 @@ func TestEveryEmbeddedFileIsUsedAndEveryUsedFileIsThere(t *testing.T) {
 	}
 	for _, p := range pages {
 		used[p.Fragment] = true
+		if p.Policy != "" {
+			used[p.Policy] = true
+		}
 	}
 	for path, f := range files {
 		if _, err := assets.ReadFile(f.name); err != nil {
@@ -402,7 +407,9 @@ func TestEveryLinkHereAnswers(t *testing.T) {
 
 // The links that leave this site go to its two names, GitHub, or mail.
 func TestEveryLinkElsewhereIsOneWeExpect(t *testing.T) {
-	allowed := regexp.MustCompile(`^(https://porch\.denyfirst\.dev/|https://github\.com/denyfirst(/|$)|https://schema\.org/Organization$|mailto:hello@denyfirst\.dev$|https://denyfirst\.dev/)`)
+	// Microsoft's privacy statement is Mohur's privacy page's, since the
+	// Store delivers the app under it.
+	allowed := regexp.MustCompile(`^(https://porch\.denyfirst\.dev/|https://github\.com/denyfirst(/|$)|https://schema\.org/Organization$|mailto:hello@denyfirst\.dev$|https://denyfirst\.dev/|https://privacy\.microsoft\.com/privacystatement$)`)
 	var seen []string
 	for path := range pages {
 		for _, m := range regexp.MustCompile(`(?:href|src|itemtype)="((?:https?:|mailto:)[^"]*)"`).FindAllStringSubmatch(pageBody(t, path), -1) {

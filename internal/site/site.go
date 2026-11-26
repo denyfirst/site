@@ -1,6 +1,8 @@
 // Package site serves denyfirst.dev, the organisation's own pages, and
 // mta-sts.denyfirst.dev, which serves the policy for mail to denyfirst.dev and
-// nothing else.
+// nothing else. Among denyfirst.dev's pages are Mohur's privacy page and terms
+// of use, in Mohur's own words (policy.go), at the addresses its Microsoft
+// Store listing gives.
 //
 // Until 2026-11 these were served by Porch's demonstration, one binary for
 // three names. They are a program of their own now, on an address of their
@@ -101,6 +103,10 @@ type page struct {
 	Fragment string
 	Data     any
 
+	// Policy, when set, names one of a product's policy files, which is read
+	// as policy.go reads it and becomes Data.
+	Policy string
+
 	// Canonical is the address the page states as its own, set at startup.
 	Canonical string
 
@@ -134,7 +140,28 @@ var pages = map[string]*page{
 			Products:     promises.Products,
 		},
 	},
+	// Mohur's privacy page and terms of use, in Mohur's own words, at the
+	// addresses its Microsoft Store listing gives. The Store links them, so
+	// they do not move. Mohur is not released yet; it is listed as coming,
+	// and these two pages are what the Store needs before it lists the app.
+	"/mohur/privacy": {
+		Title:       "Mohur privacy — denyfirst",
+		Description: "What each part of Mohur keeps, and what Mohur promises.",
+		Fragment:    "assets/policy.html",
+		Policy:      "assets/mohur/privacy.md",
+	},
+	"/mohur/terms": {
+		Title:       "Mohur terms of use — denyfirst",
+		Description: "The terms of using Mohur, which joining an organization in the app accepts.",
+		Fragment:    "assets/policy.html",
+		Policy:      "assets/mohur/terms.md",
+	},
 }
+
+// mohurPrefix is where Mohur's pages are. Every address under it is this
+// site's: Porch never had one, so a mistyped one is answered here rather than
+// sent there.
+const mohurPrefix = "/mohur"
 
 // homePage is what assets/home.html reads.
 type homePage struct {
@@ -260,6 +287,17 @@ func render(layout *template.Template, path string, p *page) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.Policy != "" {
+		source, err := assets.ReadFile(p.Policy)
+		if err != nil {
+			return nil, err
+		}
+		blocks, err := parsePolicy(string(source))
+		if err != nil {
+			return nil, err
+		}
+		p.Data = policyPage{Blocks: blocks}
+	}
 	if p.Data != nil {
 		// Parsed as a template, and its values escaped by html/template on the
 		// way in. They come from this repository either way; the escaping is
@@ -369,6 +407,9 @@ func own(path string) bool {
 	if _, ok := moved[path]; ok {
 		return true
 	}
+	if path == mohurPrefix || strings.HasPrefix(path, mohurPrefix+"/") {
+		return true
+	}
 	return path == healthPath
 }
 
@@ -412,7 +453,13 @@ func serveSite(w http.ResponseWriter, r *http.Request) {
 		write(w, r, f.contentType, f.body)
 		return
 	}
-	file := files[path]
+	file, ok := files[path]
+	if !ok {
+		// An address of this site's with nothing at it: one under Mohur's
+		// pages that is not one of them.
+		http.Error(w, "There is no page at this address.", http.StatusNotFound)
+		return
+	}
 	body, err := assets.ReadFile(file.name)
 	if err != nil {
 		// Unreachable unless the table and the embedded tree disagree, which
