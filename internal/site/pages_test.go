@@ -560,6 +560,14 @@ func TestTheFrontPagesFactsAboutPorchHold(t *testing.T) {
 	if !strings.Contains(strings.Join(strings.Fields(read("SECURITY.md")), " "), "This is an unfunded project") {
 		t.Error("Porch's SECURITY.md no longer says the project is unfunded, and the card says it has no investors")
 	}
+	// And the fingerprint Porch's SECURITY.md publishes is the one this site's
+	// security.txt gives and its key has: the two places a reporter is told to
+	// compare, kept in two repositories, so that whoever took this domain
+	// could not change both. Until v0.37.0 Porch served the key and the file
+	// too, and held them to its SECURITY.md itself.
+	if !strings.Contains(strings.Join(strings.Fields(read("SECURITY.md")), ""), PGPFingerprint) {
+		t.Errorf("Porch's SECURITY.md does not carry the fingerprint %s that security.txt gives", PGPFingerprint)
+	}
 
 	guide := strings.Join(strings.Fields(read("docs/releasing.md")), " ")
 	record, ok := between(body, `<ol class="record-rows">`, "</ol>")
