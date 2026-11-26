@@ -35,11 +35,20 @@ func TestEveryPromiseSaysHowItIsChecked(t *testing.T) {
 
 // The organisation's list names no product: each product's additions are its
 // own, on its own page.
+//
+// Nor is any of its identifiers named for one. Each product names its own
+// undertakings for itself (Porch's test there holds every one of Porch's to
+// "porch-"), so an identifier here that began with a product's name is the
+// one way the two lists could share a name, and a reader comparing the pages
+// would find them agreeing on it and disagreeing on the meaning.
 func TestTheOrganisationsPromisesNameNoProduct(t *testing.T) {
 	for _, p := range Organisation {
-		for _, product := range Products {
+		for _, product := range append(append([]Product{}, Products...), Coming...) {
 			if strings.Contains(p.Says, product.Name) || strings.Contains(p.Checked, product.Name) {
 				t.Errorf("%s names %s", p.ID, product.Name)
+			}
+			if strings.HasPrefix(p.ID, strings.ToLower(product.Name)+"-") {
+				t.Errorf("%s is named for %s, as that product's own undertakings are", p.ID, product.Name)
 			}
 		}
 	}
